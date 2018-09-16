@@ -381,6 +381,7 @@ func (ssc *StatefulSetController) resolveControllerRef(namespace string, control
 // enqueueStatefulSet enqueues the given statefulset in the work queue.
 func (ssc *StatefulSetController) enqueueStatefulSet(obj interface{}) {
 	key, err := controller.KeyFunc(obj)
+        glog.V(0).Infof("=======key==%s", key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("Cound't get key for object %+v: %v", obj, err))
 		return
@@ -419,10 +420,12 @@ func (ssc *StatefulSetController) sync(key string) error {
 	}()
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	glog.V(0).Infof("====namespace=%s name=%s====", namespace, name)
 	if err != nil {
 		return err
 	}
 	set, err := ssc.setLister.StatefulSets(namespace).Get(name)
+	glog.V(0).Infof("======set=%#v", set)
 	if errors.IsNotFound(err) {
 		glog.Infof("StatefulSet has been deleted %v", key)
 		return nil
@@ -433,6 +436,7 @@ func (ssc *StatefulSetController) sync(key string) error {
 	}
 
 	selector, err := metav1.LabelSelectorAsSelector(set.Spec.Selector)
+	glog.V(0).Infof("========selector=%#v", selector)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("error converting StatefulSet %v selector: %v", key, err))
 		// This is a non-transient error, so don't retry.
@@ -444,6 +448,7 @@ func (ssc *StatefulSetController) sync(key string) error {
 	}
 
 	pods, err := ssc.getPodsForStatefulSet(set, selector)
+	glog.V(0).Infof("=======pods=%#v", pods)
 	if err != nil {
 		return err
 	}

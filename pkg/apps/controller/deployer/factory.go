@@ -38,6 +38,9 @@ func NewDeployerController(
 	eventBroadcaster.StartRecordingToSink(&kv1core.EventSinkImpl{Interface: kubeClientset.CoreV1().Events("")})
 	recorder := eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: "deployer-controller"})
 
+	fmt.Println("===================================")
+	fmt.Println("==================deployerImage:", image)
+	fmt.Println("===================================")
 	c := &DeploymentController{
 		rn: kubeClientset.CoreV1(),
 		pn: kubeClientset.CoreV1(),
@@ -50,7 +53,7 @@ func NewDeployerController(
 		podListerSynced: podInformer.Informer().HasSynced,
 
 		serviceAccount: sa,
-		deployerImage:  image,
+		deployerImage:  "openshift/origin-deployer:latest", //image,
 		environment:    appsutil.CopyApiEnvVarToV1EnvVar(env),
 		recorder:       recorder,
 		codec:          codec,

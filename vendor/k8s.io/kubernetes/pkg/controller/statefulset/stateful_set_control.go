@@ -76,6 +76,7 @@ func (ssc *defaultStatefulSetControl) UpdateStatefulSet(set *apps.StatefulSet, p
 
 	// list all revisions and sort them
 	revisions, err := ssc.ListRevisions(set)
+	glog.V(0).Infof("========revisions=%#v", revisions)
 	if err != nil {
 		return err
 	}
@@ -83,12 +84,14 @@ func (ssc *defaultStatefulSetControl) UpdateStatefulSet(set *apps.StatefulSet, p
 
 	// get the current, and update revisions
 	currentRevision, updateRevision, collisionCount, err := ssc.getStatefulSetRevisions(set, revisions)
+	glog.V(0).Infof("====currentRevision=%#v updateRevision=%#v collisionCount=%#v", currentRevision, updateRevision, collisionCount)
 	if err != nil {
 		return err
 	}
 
 	// perform the main update function and get the status
 	status, err := ssc.updateStatefulSet(set, currentRevision, updateRevision, collisionCount, pods)
+	glog.V(0).Infof("====status=%#v", status)
 	if err != nil {
 		return err
 	}
@@ -188,6 +191,7 @@ func (ssc *defaultStatefulSetControl) getStatefulSetRevisions(
 	var currentRevision, updateRevision *apps.ControllerRevision
 
 	revisionCount := len(revisions)
+	glog.V(0).Infof("====revisionCount=%#v", revisionCount)
 	history.SortControllerRevisions(revisions)
 
 	// Use a local copy of set.Status.CollisionCount to avoid modifying set.Status directly.
@@ -199,13 +203,16 @@ func (ssc *defaultStatefulSetControl) getStatefulSetRevisions(
 
 	// create a new revision from the current set
 	updateRevision, err := newRevision(set, nextRevision(revisions), &collisionCount)
+	glog.V(0).Infof("======updateRevision=%#v", updateRevision)
 	if err != nil {
 		return nil, nil, collisionCount, err
 	}
 
 	// find any equivalent revisions
 	equalRevisions := history.FindEqualRevisions(revisions, updateRevision)
+	glog.V(0).Infof("======equalRevisions=%#v", equalRevisions)
 	equalCount := len(equalRevisions)
+	glog.V(0).Infof("======equalCount=%#v", equalCount)
 
 	if equalCount > 0 && history.EqualRevision(revisions[revisionCount-1], equalRevisions[equalCount-1]) {
 		// if the equivalent revision is immediately prior the update revision has not changed
@@ -259,10 +266,12 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	pods []*v1.Pod) (*apps.StatefulSetStatus, error) {
 	// get the current and update revisions of the set.
 	currentSet, err := ApplyRevision(set, currentRevision)
+	glog.V(0).Infof("====currentSet=%#v", currentSet)
 	if err != nil {
 		return nil, err
 	}
 	updateSet, err := ApplyRevision(set, updateRevision)
+	glog.V(0).Infof("====updateSet=%#v", updateSet)
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +285,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	*status.CollisionCount = collisionCount
 
 	replicaCount := int(*set.Spec.Replicas)
+	glog.V(0).Infof("====replicaCount=%#v", replicaCount)
 	// slice that will contain all Pods such that 0 <= getOrdinal(pod) < set.Spec.Replicas
 	replicas := make([]*v1.Pod, replicaCount)
 	// slice that will contain all Pods such that set.Spec.Replicas <= getOrdinal(pod)
@@ -284,6 +294,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	firstUnhealthyOrdinal := math.MaxInt32
 	var firstUnhealthyPod *v1.Pod
 
+	glog.V(0).Infof("====pods=%#v", pods)
 	// First we partition pods into two lists valid replicas and condemned Pods
 	for i := range pods {
 		status.Replicas++
@@ -329,6 +340,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	// sort the condemned Pods by their ordinals
 	sort.Sort(ascendingOrdinal(condemned))
 
+	glog.V(0).Infof("=======replicas====%#v", replicas)
 	// find the first unhealthy Pod
 	for i := range replicas {
 		if !isHealthy(replicas[i]) {
@@ -340,6 +352,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 		}
 	}
 
+	glog.V(0).Infof("=======condemned=%#v", condemned)
 	for i := range condemned {
 		if !isHealthy(condemned[i]) {
 			unhealthy++
@@ -350,6 +363,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 		}
 	}
 
+	glog.V(0).Infof("=======unhealthy=%#v", unhealthy)
 	if unhealthy > 0 {
 		glog.V(4).Infof("StatefulSet %s/%s has %d unhealthy Pods starting with %s",
 			set.Namespace,
@@ -358,6 +372,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			firstUnhealthyPod.Name)
 	}
 
+	glog.V(0).Infof("=====DeletionTimestamp=%#v", set.DeletionTimestamp)
 	// If the StatefulSet is being deleted, don't do anything other than updating
 	// status.
 	if set.DeletionTimestamp != nil {
@@ -366,8 +381,11 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 
 	monotonic := !allowsBurst(set)
 
+	glog.V(0).Infof("=====monotonic=%#v", monotonic)
 	// Examine each replica with respect to its ordinal
 	for i := range replicas {
+		glog.V(0).Infof("======replicas[i]=%#v", replicas[i])
+		glog.V(0).Infof("=====isFailed=%#v", isFailed(replicas[i]))
 		// delete and recreate failed pods
 		if isFailed(replicas[i]) {
 			ssc.recorder.Eventf(set, v1.EventTypeWarning, "RecreatingFailedPod",
@@ -392,21 +410,31 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 				updateRevision.Name,
 				i)
 		}
+		glog.V(0).Infof("====isCreated=%#v", isCreated(replicas[i]))
 		// If we find a Pod that has not been created we create the Pod
 		if !isCreated(replicas[i]) {
 			if err := ssc.podControl.CreateStatefulPod(set, replicas[i]); err != nil {
 				return &status, err
 			}
 			status.Replicas++
+			glog.Infof("=====status.Replicas=%#v", status.Replicas)
+			glog.Infof("======getPodRevision=%#v", getPodRevision(replicas[i]))
+			glog.Infof("=====currentRevision.Name=%#v", currentRevision.Name)
 			if getPodRevision(replicas[i]) == currentRevision.Name {
 				status.CurrentReplicas++
 			}
+			glog.Infof("=====status.CurrentReplicas=%#v", status.CurrentReplicas)
+			glog.Infof("====getPodRevision=%#v", getPodRevision(replicas[i]))
+			glog.Infof("=====updateRevision.Name=%#v", updateRevision.Name)
 			if getPodRevision(replicas[i]) == updateRevision.Name {
 				status.UpdatedReplicas++
 			}
+			glog.Infof("=====status.UpdatedReplicas=%#v", status.UpdatedReplicas)
 
 			// if the set does not allow bursting, return immediately
+			glog.Infof("=====monotonic=%#v", monotonic)
 			if monotonic {
+				glog.Infof("====status=%#v", status)
 				return &status, nil
 			}
 			// pod created, no more work possible for this round
@@ -449,6 +477,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	// We will terminate Pods in a monotonically decreasing order over [len(pods),set.Spec.Replicas).
 	// Note that we do not resurrect Pods in this interval. Also not that scaling will take precedence over
 	// updates.
+	glog.Infof("=====condemned=%#v", condemned)
 	for target := len(condemned) - 1; target >= 0; target-- {
 		// wait for terminating pods to expire
 		if isTerminating(condemned[target]) {
@@ -492,19 +521,25 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 	}
 
 	// for the OnDelete strategy we short circuit. Pods will be updated when they are manually deleted.
+	glog.Infof("=====set.Spec.UpdateStrategy.Type=%#v", set.Spec.UpdateStrategy.Type)
 	if set.Spec.UpdateStrategy.Type == apps.OnDeleteStatefulSetStrategyType {
 		return &status, nil
 	}
 
 	// we compute the minimum ordinal of the target sequence for a destructive update based on the strategy.
 	updateMin := 0
+	glog.Infof("======set.Spec.UpdateStrategy.RollingUpdate=%#v", set.Spec.UpdateStrategy.RollingUpdate)
 	if set.Spec.UpdateStrategy.RollingUpdate != nil {
 		updateMin = int(*set.Spec.UpdateStrategy.RollingUpdate.Partition)
 	}
+	glog.Infof("=====updateMin=%#v", updateMin)
 	// we terminate the Pod with the largest ordinal that does not match the update revision.
 	for target := len(replicas) - 1; target >= updateMin; target-- {
 
 		// delete the Pod if it is not already terminating and does not match the update revision.
+		glog.Infof("=======getPodRevision=%#v", getPodRevision(replicas[target]))
+		glog.Infof("======updateRevision.Name=%#v", updateRevision.Name)
+		glog.Infof("=====isTerminating=%#v", isTerminating(replicas[target]))
 		if getPodRevision(replicas[target]) != updateRevision.Name && !isTerminating(replicas[target]) {
 			glog.V(2).Infof("StatefulSet %s/%s terminating Pod %s for update",
 				set.Namespace,
@@ -516,6 +551,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 		}
 
 		// wait for unhealthy Pods on update
+		glog.Infof("=======isHealthy=%#v", isHealthy)
 		if !isHealthy(replicas[target]) {
 			glog.V(4).Infof(
 				"StatefulSet %s/%s is waiting for Pod %s to update",

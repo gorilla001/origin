@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -34,6 +35,9 @@ func main() {
 		runtime.GOMAXPROCS(runtime.NumCPU())
 	}
 
+	fmt.Println("======", scheme.Scheme)
+	fmt.Println("======", scheme.GroupFactoryRegistry)
+	fmt.Println("======", scheme.Registry)
 	apiinstall.InstallAll(scheme.Scheme, scheme.GroupFactoryRegistry, scheme.Registry)
 	apilegacy.LegacyInstallAll(scheme.Scheme, scheme.Registry)
 

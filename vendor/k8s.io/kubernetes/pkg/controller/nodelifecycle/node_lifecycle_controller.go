@@ -232,6 +232,7 @@ func NewNodeLifecycleController(podInformer coreinformers.PodInformer,
 		metrics.RegisterMetricAndTrackRateLimiterUsage("node_lifecycle_controller", kubeClient.CoreV1().RESTClient().GetRateLimiter())
 	}
 
+	glog.V(0).Infof("=======podEvictionTimeout=%#v nodeMonitorPeriod=%#v nodeMonitorGracePeriod=%#v", podEvictionTimeout, nodeMonitorPeriod, nodeMonitorGracePeriod)
 	nc := &Controller{
 		cloud:         cloud,
 		kubeClient:    kubeClient,
@@ -242,7 +243,7 @@ func NewNodeLifecycleController(podInformer coreinformers.PodInformer,
 			return nodeutil.ExistsInCloudProvider(cloud, nodeName)
 		},
 		recorder:                    recorder,
-		nodeMonitorPeriod:           nodeMonitorPeriod,
+		nodeMonitorPeriod:           time.Duration(time.Second*60), //nodeMonitorPeriod,
 		nodeStartupGracePeriod:      nodeStartupGracePeriod,
 		nodeMonitorGracePeriod:      nodeMonitorGracePeriod,
 		zonePodEvictor:              make(map[string]*scheduler.RateLimitedTimedQueue),
@@ -552,7 +553,7 @@ func (nc *Controller) monitorNodeStatus() error {
 	}
 
 	for i := range added {
-		glog.V(1).Infof("Controller observed a new Node: %#v", added[i].Name)
+		glog.V(0).Infof("Controller observed a new Node: %#v", added[i].Name)
 		nodeutil.RecordNodeEvent(nc.recorder, added[i].Name, string(added[i].UID), v1.EventTypeNormal, "RegisteredNode", fmt.Sprintf("Registered Node %v in Controller", added[i].Name))
 		nc.knownNodeSet[added[i].Name] = added[i]
 		nc.addPodEvictorForNewZone(added[i])
@@ -564,19 +565,30 @@ func (nc *Controller) monitorNodeStatus() error {
 	}
 
 	for i := range deleted {
-		glog.V(1).Infof("Controller observed a Node deletion: %v", deleted[i].Name)
+		glog.V(0).Infof("Controller observed a Node deletion: %v", deleted[i].Name)
 		nodeutil.RecordNodeEvent(nc.recorder, deleted[i].Name, string(deleted[i].UID), v1.EventTypeNormal, "RemovingNode", fmt.Sprintf("Removing Node %v from Controller", deleted[i].Name))
 		delete(nc.knownNodeSet, deleted[i].Name)
 	}
 
 	zoneToNodeConditions := map[string][]*v1.NodeCondition{}
 	for i := range nodes {
+		glog.V(0).Info("===============================================")
+		glog.V(0).Info("===============================================")
+		glog.V(0).Info("===============================================")
+		glog.V(0).Infof("===============", nodes[i].Labels)
+		for k, v := range nodes[i].Labels {
+			glog.V(0).Infof("=======%s=%s", k, v)
+		}
+		glog.V(0).Info("===============================================")
+		glog.V(0).Info("===============================================")
+		glog.V(0).Info("===============================================")
 		var gracePeriod time.Duration
 		var observedReadyCondition v1.NodeCondition
 		var currentReadyCondition *v1.NodeCondition
 		node := nodes[i].DeepCopy()
 		if err := wait.PollImmediate(retrySleepTime, retrySleepTime*scheduler.NodeStatusUpdateRetry, func() (bool, error) {
 			gracePeriod, observedReadyCondition, currentReadyCondition, err = nc.tryUpdateNodeStatus(node)
+			glog.V(0).Infof("=====node=%#v gracePeriod=%#v  observedReadyCondition.Status=%#v currentReadyCondition.Status=%#v", node.Name, gracePeriod, observedReadyCondition.Status, currentReadyCondition.Status) 
 			if err == nil {
 				return true, nil
 			}
@@ -597,6 +609,7 @@ func (nc *Controller) monitorNodeStatus() error {
 		if !system.IsMasterNode(node.Name) {
 			zoneToNodeConditions[utilnode.GetZoneKey(node)] = append(zoneToNodeConditions[utilnode.GetZoneKey(node)], currentReadyCondition)
 		}
+	
 
 		decisionTimestamp := nc.now()
 		if currentReadyCondition != nil {
@@ -610,7 +623,7 @@ func (nc *Controller) monitorNodeStatus() error {
 							glog.Errorf("Failed to instantly swap UnreachableTaint to NotReadyTaint. Will try again in the next cycle.")
 						}
 					} else if nc.markNodeForTainting(node) {
-						glog.V(2).Infof("Node %v is NotReady as of %v. Adding it to the Taint queue.",
+						glog.V(0).Infof("Node %v is NotReady as of %v. Adding it to the Taint queue.",
 							node.Name,
 							decisionTimestamp,
 						)
@@ -618,7 +631,7 @@ func (nc *Controller) monitorNodeStatus() error {
 				} else {
 					if decisionTimestamp.After(nc.nodeStatusMap[node.Name].readyTransitionTimestamp.Add(nc.podEvictionTimeout)) {
 						if nc.evictPods(node) {
-							glog.V(2).Infof("Node is NotReady. Adding Pods on Node %s to eviction queue: %v is later than %v + %v",
+							glog.V(0).Infof("Node is NotReady. Adding Pods on Node %s to eviction queue: %v is later than %v + %v",
 								node.Name,
 								decisionTimestamp,
 								nc.nodeStatusMap[node.Name].readyTransitionTimestamp,
@@ -637,15 +650,17 @@ func (nc *Controller) monitorNodeStatus() error {
 							glog.Errorf("Failed to instantly swap UnreachableTaint to NotReadyTaint. Will try again in the next cycle.")
 						}
 					} else if nc.markNodeForTainting(node) {
-						glog.V(2).Infof("Node %v is unresponsive as of %v. Adding it to the Taint queue.",
+						glog.V(0).Infof("Node %v is unresponsive as of %v. Adding it to the Taint queue.",
 							node.Name,
 							decisionTimestamp,
 						)
 					}
 				} else {
+					glog.V(0).Infof("====nc.podEvictionTimeout %#v", nc.podEvictionTimeout)
 					if decisionTimestamp.After(nc.nodeStatusMap[node.Name].probeTimestamp.Add(nc.podEvictionTimeout)) {
+						glog.V(0).Infof("=====node %s evictPod", node.Name)
 						if nc.evictPods(node) {
-							glog.V(2).Infof("Node is unresponsive. Adding Pods on Node %s to eviction queues: %v is later than %v + %v",
+							glog.V(0).Infof("===Node is unresponsive. Adding Pods on Node %s to eviction queues: %v is later than %v + %v",
 								node.Name,
 								decisionTimestamp,
 								nc.nodeStatusMap[node.Name].readyTransitionTimestamp,
@@ -662,11 +677,12 @@ func (nc *Controller) monitorNodeStatus() error {
 						glog.Errorf("Failed to remove taints from node %v. Will retry in next iteration.", node.Name)
 					}
 					if removed {
-						glog.V(2).Infof("Node %s is healthy again, removing all taints", node.Name)
+						glog.V(0).Infof("Node %s is healthy again, removing all taints", node.Name)
 					}
 				} else {
+					glog.V(0).Infof("=====node %s cancelPodEviction", node.Name)
 					if nc.cancelPodEviction(node) {
-						glog.V(2).Infof("Node %s is ready again, cancelled pod eviction", node.Name)
+						glog.V(0).Infof("Node %s is ready again, cancelled pod eviction", node.Name)
 					}
 				}
 			}
@@ -674,6 +690,7 @@ func (nc *Controller) monitorNodeStatus() error {
 			// Report node event.
 			if currentReadyCondition.Status != v1.ConditionTrue && observedReadyCondition.Status == v1.ConditionTrue {
 				nodeutil.RecordNodeStatusChange(nc.recorder, node, "NodeNotReady")
+				glog.V(0).Info("====Mark all pods NotReady on node: %v", node.Name)
 				if err = nodeutil.MarkAllPodsNotReady(nc.kubeClient, node); err != nil {
 					utilruntime.HandleError(fmt.Errorf("Unable to mark all pods NotReady on node %v: %v", node.Name, err))
 				}
@@ -688,7 +705,7 @@ func (nc *Controller) monitorNodeStatus() error {
 					continue
 				}
 				if !exists {
-					glog.V(2).Infof("Deleting node (no longer present in cloud provider): %s", node.Name)
+					glog.V(0).Infof("Deleting node (no longer present in cloud provider): %s", node.Name)
 					nodeutil.RecordNodeEvent(nc.recorder, node.Name, string(node.UID), v1.EventTypeNormal, "DeletingNode", fmt.Sprintf("Deleting Node %v because it's not present according to cloud provider", node.Name))
 					go func(nodeName string) {
 						defer utilruntime.HandleCrash()
@@ -765,7 +782,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 			readyTransitionTimestamp: nc.now(),
 		}
 	} else if savedCondition == nil && observedCondition != nil {
-		glog.V(1).Infof("Creating timestamp entry for newly observed Node %s", node.Name)
+		glog.V(0).Infof("Creating timestamp entry for newly observed Node %s", node.Name)
 		savedNodeStatus = nodeStatusData{
 			status:                   node.Status,
 			probeTimestamp:           nc.now(),
@@ -784,7 +801,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 		// If ReadyCondition changed since the last time we checked, we update the transition timestamp to "now",
 		// otherwise we leave it as it is.
 		if savedCondition.LastTransitionTime != observedCondition.LastTransitionTime {
-			glog.V(3).Infof("ReadyCondition for Node %s transitioned from %v to %v", node.Name, savedCondition, observedCondition)
+			glog.V(0).Infof("ReadyCondition for Node %s transitioned from %v to %v", node.Name, savedCondition, observedCondition)
 			transitionTime = nc.now()
 		} else {
 			transitionTime = savedNodeStatus.readyTransitionTimestamp
@@ -792,7 +809,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 		if glog.V(5) {
 			glog.V(5).Infof("Node %s ReadyCondition updated. Updating timestamp: %+v vs %+v.", node.Name, savedNodeStatus.status, node.Status)
 		} else {
-			glog.V(3).Infof("Node %s ReadyCondition updated. Updating timestamp.", node.Name)
+			glog.V(5).Infof("Node %s ReadyCondition updated. Updating timestamp.", node.Name)
 		}
 		savedNodeStatus = nodeStatusData{
 			status:                   node.Status,
@@ -806,7 +823,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 		// NodeReady condition was last set longer ago than gracePeriod, so update it to Unknown
 		// (regardless of its current value) in the master.
 		if currentReadyCondition == nil {
-			glog.V(2).Infof("node %v is never updated by kubelet", node.Name)
+			glog.V(0).Infof("node %v is never updated by kubelet", node.Name)
 			node.Status.Conditions = append(node.Status.Conditions, v1.NodeCondition{
 				Type:               v1.NodeReady,
 				Status:             v1.ConditionUnknown,
@@ -816,7 +833,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 				LastTransitionTime: nc.now(),
 			})
 		} else {
-			glog.V(4).Infof("node %v hasn't been updated for %+v. Last ready condition is: %+v",
+			glog.V(0).Infof("node %v hasn't been updated for %+v. Last ready condition is: %+v",
 				node.Name, nc.now().Time.Sub(savedNodeStatus.probeTimestamp.Time), observedReadyCondition)
 			if observedReadyCondition.Status != v1.ConditionUnknown {
 				currentReadyCondition.Status = v1.ConditionUnknown
@@ -841,7 +858,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 		for _, nodeConditionType := range remainingNodeConditionTypes {
 			_, currentCondition := v1node.GetNodeCondition(&node.Status, nodeConditionType)
 			if currentCondition == nil {
-				glog.V(2).Infof("Condition %v of node %v was never updated by kubelet", nodeConditionType, node.Name)
+				glog.V(0).Infof("Condition %v of node %v was never updated by kubelet", nodeConditionType, node.Name)
 				node.Status.Conditions = append(node.Status.Conditions, v1.NodeCondition{
 					Type:               nodeConditionType,
 					Status:             v1.ConditionUnknown,
@@ -851,7 +868,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 					LastTransitionTime: nowTimestamp,
 				})
 			} else {
-				glog.V(4).Infof("node %v hasn't been updated for %+v. Last %v is: %+v",
+				glog.V(0).Infof("node %v hasn't been updated for %+v. Last %v is: %+v",
 					node.Name, nc.now().Time.Sub(savedNodeStatus.probeTimestamp.Time), nodeConditionType, currentCondition)
 				if currentCondition.Status != v1.ConditionUnknown {
 					currentCondition.Status = v1.ConditionUnknown
@@ -864,6 +881,7 @@ func (nc *Controller) tryUpdateNodeStatus(node *v1.Node) (time.Duration, v1.Node
 
 		_, currentCondition := v1node.GetNodeCondition(&node.Status, v1.NodeReady)
 		if !apiequality.Semantic.DeepEqual(currentCondition, &observedReadyCondition) {
+			glog.V(0).Infof("======update node %v status to NotReady", node.Name)
 			if _, err = nc.kubeClient.CoreV1().Nodes().UpdateStatus(node); err != nil {
 				glog.Errorf("Error updating node %s: %v", node.Name, err)
 				return gracePeriod, observedReadyCondition, currentReadyCondition, err
@@ -921,6 +939,7 @@ func (nc *Controller) handleDisruption(zoneToNodeConditions map[string][]*v1.Nod
 	if !allAreFullyDisrupted || !allWasFullyDisrupted {
 		// We're switching to full disruption mode
 		if allAreFullyDisrupted {
+			glog.V(0).Infof("====allAreFullyDisrupted=%#v", allAreFullyDisrupted)
 			glog.V(0).Info("Controller detected that all Nodes are not-Ready. Entering master disruption mode.")
 			for i := range nodes {
 				if nc.useTaintBasedEvictions {
@@ -948,6 +967,7 @@ func (nc *Controller) handleDisruption(zoneToNodeConditions map[string][]*v1.Nod
 		}
 		// We're exiting full disruption mode
 		if allWasFullyDisrupted {
+			glog.V(0).Infof("====allWasFullyDisrupted=%#v", allWasFullyDisrupted) 
 			glog.V(0).Info("Controller detected that some Nodes are Ready. Exiting master disruption mode.")
 			// When exiting disruption mode update probe timestamps on all Nodes.
 			now := nc.now()
@@ -1077,6 +1097,7 @@ func (nc *Controller) addPodEvictorForNewZone(node *v1.Node) {
 // cancelPodEviction removes any queued evictions, typically because the node is available again. It
 // returns true if an eviction was queued.
 func (nc *Controller) cancelPodEviction(node *v1.Node) bool {
+	glog.V(0).Info("======================= cancelPodEviction enter")
 	zone := utilnode.GetZoneKey(node)
 	nc.evictorLock.Lock()
 	defer nc.evictorLock.Unlock()
@@ -1091,6 +1112,7 @@ func (nc *Controller) cancelPodEviction(node *v1.Node) bool {
 // evictPods queues an eviction for the provided node name, and returns false if the node is already
 // queued for eviction.
 func (nc *Controller) evictPods(node *v1.Node) bool {
+	glog.V(0).Info("=========================== evictPods enter")
 	nc.evictorLock.Lock()
 	defer nc.evictorLock.Unlock()
 	return nc.zonePodEvictor[utilnode.GetZoneKey(node)].Add(node.Name, string(node.UID))

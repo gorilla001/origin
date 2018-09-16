@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"github.com/golang/glog"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -115,6 +116,10 @@ func NewServiceProxyHandler(serviceName string, serviceNamespace string, service
 
 func (r *serviceProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// write a new location based on the existing request pointed at the target service
+	glog.V(0).Infof("===================== %#v", req.URL)
+	glog.V(0).Infof("===================== %#v", req.URL.Path)
+	glog.V(0).Infof("===================== r.serviceNamespace=%#v", r.serviceNamespace)
+	glog.V(0).Infof("===================== r.serviceName=%#v", r.serviceName)
 	location := &url.URL{}
 	location.Scheme = "https"
 	rloc, err := r.serviceResolver.ResolveEndpoint(r.serviceNamespace, r.serviceName)
@@ -142,6 +147,8 @@ func (r *serviceProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 	newReq := req.WithContext(context.Background())
 	newReq.Header = utilnet.CloneHeader(req.Header)
 	newReq.URL = location
+
+	glog.V(0).Infof("===================== newReq=%#v", newReq.URL)
 
 	handler := proxy.NewUpgradeAwareHandler(location, r.proxyRoundTripper, false, false, &responder{w: w})
 	handler.ServeHTTP(w, newReq)

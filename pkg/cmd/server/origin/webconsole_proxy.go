@@ -25,8 +25,10 @@ import (
 // and the Accept header supports text/html
 func withAssetServerRedirect(handler http.Handler, accessor *webConsolePublicURLAccessor) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		glog.V(0).Infof("===================== %#v", req.URL.Path)
 		if req.URL.Path == "/" && httprequest.PrefersHTML(req) {
 			webconsolePublicURL := accessor.getPublicConsoleURL()
+			glog.V(0).Infof("===================== %#v", webconsolePublicURL)
 			if len(webconsolePublicURL) > 0 {
 				http.Redirect(w, req, webconsolePublicURL, http.StatusFound)
 				return
@@ -42,6 +44,8 @@ func withAssetServerRedirect(handler http.Handler, accessor *webConsolePublicURL
 
 func (c *MasterConfig) withConsoleRedirection(handler, assetServerHandler http.Handler, accessor *webConsolePublicURLAccessor) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		glog.V(0).Infof("===================== %#v", req.URL.Path)
+		glog.V(0).Infof("===================== %#v", req.URL)
 		// blacklist well known paths so we do not risk recursion deadlocks
 		for _, prefix := range []string{"/apis", "/api", "/oapi", "/healthz", "/version"} {
 			if req.URL.Path == prefix || strings.HasPrefix(req.URL.Path, prefix+"/") {
@@ -52,6 +56,7 @@ func (c *MasterConfig) withConsoleRedirection(handler, assetServerHandler http.H
 		}
 
 		webconsolePublicURL := accessor.getPublicConsoleURL()
+		glog.V(0).Infof("===================== %#v", webconsolePublicURL)
 		if len(webconsolePublicURL) > 0 {
 			publicURL, err := url.Parse(webconsolePublicURL)
 			if err != nil {
@@ -61,6 +66,7 @@ func (c *MasterConfig) withConsoleRedirection(handler, assetServerHandler http.H
 				handler.ServeHTTP(w, req)
 				return
 			}
+			glog.V(0).Infof("===================== %#v", publicURL)
 
 			prefix := publicURL.Path
 			// prefix must not include a trailing '/'
@@ -68,6 +74,7 @@ func (c *MasterConfig) withConsoleRedirection(handler, assetServerHandler http.H
 			if publicURL.Path[lastIndex] == '/' {
 				prefix = publicURL.Path[0:lastIndex]
 			}
+			glog.V(0).Infof("===================== %#v", prefix)
 			if req.URL.Path == prefix || strings.HasPrefix(req.URL.Path, prefix+"/") {
 				assetServerHandler.ServeHTTP(w, req)
 				return
